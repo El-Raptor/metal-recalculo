@@ -5,9 +5,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import br.com.sankhya.dao.ItemDAO;
 import br.com.sankhya.extensions.eventoprogramavel.EventoProgramavelJava;
+import br.com.sankhya.jape.EntityFacade;
 import br.com.sankhya.jape.core.JapeSession;
 import br.com.sankhya.jape.core.JapeSession.SessionHandle;
+import br.com.sankhya.jape.dao.JdbcWrapper;
 import br.com.sankhya.jape.event.PersistenceEvent;
 import br.com.sankhya.jape.event.TransactionContext;
 import br.com.sankhya.jape.util.JapeSessionContext;
@@ -19,6 +22,7 @@ import br.com.sankhya.modelcore.MGEModelException;
 import br.com.sankhya.modelcore.comercial.CentralItemNota;
 import br.com.sankhya.modelcore.comercial.centrais.CACHelper;
 import br.com.sankhya.modelcore.util.DynamicEntityNames;
+import br.com.sankhya.modelcore.util.EntityFacadeFactory;
 import br.com.sankhya.ws.ServiceContext;
 
 public class Recalculo implements EventoProgramavelJava {
@@ -26,32 +30,44 @@ public class Recalculo implements EventoProgramavelJava {
 	@Override
 	public void afterUpdate(PersistenceEvent ctx) throws Exception {
 		SessionHandle hnd = null;
+		JdbcWrapper jdbc = null;
 
 		try {
 			hnd = JapeSession.open();
-			DynamicVO notaVO = (DynamicVO) ctx.getVo();
-			BigDecimal nunota = notaVO.asBigDecimal("NUNOTA");
-			BigDecimal peso = notaVO.asBigDecimal("PESO");
+			EntityFacade dwfEntityFacade = EntityFacadeFactory.getDWFFacade();
+			jdbc = dwfEntityFacade.getJdbcWrapper();
 
-			if (peso.compareTo(new BigDecimal(250)) == 1) {
-				JapeWrapper itemDAO = JapeFactory.dao(DynamicEntityNames.ITEM_NOTA);
-				Collection<DynamicVO> itensVO = (Collection<DynamicVO>) itemDAO.find("NUNOTA = ?", nunota);
+			DynamicVO iteVO = (DynamicVO) ctx.getVo();
+			BigDecimal nunota = iteVO.asBigDecimal("NUNOTA");
+			BigDecimal sequencia = iteVO.asBigDecimal("SEQUENCIA");
 
-				for (DynamicVO itemVO : itensVO) {
-					/* Inicializando item */
-					Item item = Item.builder(itemVO);
-					updateItemOrder(item, itemVO, notaVO);
-				}
+			// Se for a primeira sequência.
+			if (sequencia.equals(BigDecimal.ONE))
+				return;
+
+			JapeWrapper itemDAO = JapeFactory.dao(DynamicEntityNames.ITEM_NOTA);
+			Collection<DynamicVO> itensVO = (Collection<DynamicVO>) itemDAO.find("NUNOTA = ?", nunota);
+
+			for (DynamicVO itemVO : itensVO) {
+				// Inicializando item
+				Item item = Item.builder(itemVO);
+				ItemDAO.update(jdbc, item);
+				updateItemOrder(item, itemVO);
 			}
-			
+
+			// if (hnd != null)
+			// throw new Exception("Nunota: " + nunota + "\nPeso: " + peso + "\nQtdNeg: " +
+			// qtdneg);
+
 		} catch (Exception e) {
 			e.printStackTrace();
 			e.getMessage();
 			MGEModelException.throwMe(e);
 		} finally {
 			JapeSession.close(hnd);
+			jdbc.closeSession();
 		}
-		
+
 	}
 
 	/**
@@ -60,11 +76,9 @@ public class Recalculo implements EventoProgramavelJava {
 	 * @param item   instância de um item com as propriedades que serão usadas para
 	 *               alterar o item no sistema.
 	 * @param itemVO instância de um registro do item de uma nota que será alterado.
-	 * @param cabVO  instância de um registro da nota que contém o item que será
-	 *               alterado.
 	 * @throws Exception
 	 */
-	private static void updateItemOrder(Item item, DynamicVO itemVO, DynamicVO cabVO) throws Exception {
+	private static void updateItemOrder(Item item, DynamicVO itemVO) throws Exception {
 		// Variáveis do sistema nos quais permitem recalcular o financeiro
 		JapeSessionContext.putProperty("br.com.sankhya.com.CentralCompraVenda", Boolean.TRUE);
 		JapeSessionContext.putProperty("ItemNota.incluindo.alterando.pela.central", Boolean.TRUE);
@@ -73,21 +87,21 @@ public class Recalculo implements EventoProgramavelJava {
 
 		BigDecimal vlrunit = item.getVlrunit();
 
-		//itemVO.setProperty("CODPROD", item.getCodprod());
-		itemVO.setProperty("QTDNEG", item.getQtdneg());
-		//itemVO.setProperty("VLRDESC", item.getVlrdesc());
-		//itemVO.setProperty("PERCDESC", item.getPercdesc());
+		// itemVO.setProperty("CODPROD", item.getCodprod());
+		// itemVO.setProperty("QTDNEG", item.getQtdneg());
+		// itemVO.setProperty("VLRDESC", item.getVlrdesc());
+		// itemVO.setProperty("PERCDESC", item.getPercdesc());
 		itemVO.setProperty("VLRUNIT", new BigDecimal(23));
 		itemVO.setProperty("VLRTOT", vlrunit.multiply(item.getQtdneg()));
 
 		CentralItemNota itemNota = new CentralItemNota();
-		itemNota.recalcularValores("VLRUNIT", vlrunit.toString(), itemVO, cabVO.asBigDecimal("NUNOTA"));
+		itemNota.recalcularValores("VLRUNIT", vlrunit.toString(), itemVO, itemVO.asBigDecimal("NUNOTA"));
 
 		List<DynamicVO> itensFatura = new ArrayList<DynamicVO>();
 		itensFatura.add(itemVO);
 
 		CACHelper cacHelper = new CACHelper();
-		cacHelper.incluirAlterarItem(cabVO.asBigDecimal("NUNOTA"), service, null, false, itensFatura);
+		cacHelper.incluirAlterarItem(itemVO.asBigDecimal("NUNOTA"), service, null, false, itensFatura);
 	}
 
 	@Override

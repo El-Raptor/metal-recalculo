@@ -28,7 +28,7 @@ import br.com.sankhya.ws.ServiceContext;
 public class Recalculo implements EventoProgramavelJava {
 
 	@Override
-	public void afterUpdate(PersistenceEvent ctx) throws Exception {
+	public void beforeUpdate(PersistenceEvent ctx) throws Exception {
 		SessionHandle hnd = null;
 		JdbcWrapper jdbc = null;
 
@@ -37,23 +37,39 @@ public class Recalculo implements EventoProgramavelJava {
 			EntityFacade dwfEntityFacade = EntityFacadeFactory.getDWFFacade();
 			jdbc = dwfEntityFacade.getJdbcWrapper();
 
-			DynamicVO iteVO = (DynamicVO) ctx.getVo();
-			BigDecimal nunota = iteVO.asBigDecimal("NUNOTA");
-			BigDecimal sequencia = iteVO.asBigDecimal("SEQUENCIA");
+			// Obtém as instâncias atuais da tabela TGFCAB
+			DynamicVO cabVO = (DynamicVO) ctx.getVo();
+			DynamicVO oldCabVO = (DynamicVO) ctx.getOldVO();
 
-			// Se for a primeira sequência.
-			if (sequencia.equals(BigDecimal.ONE))
-				return;
+			BigDecimal nunota = cabVO.asBigDecimal("NUNOTA");
+
+			// Se a nota não for nem Pedido nem Venda.
+			if (!cabVO.asString("TIPMOV").equals("P") && !cabVO.asString("TIPMOV").equals("V")) {
+				throw new Exception("Movimentação tem q ser igual a P ou V");
+				// return;
+			}
+
 
 			JapeWrapper itemDAO = JapeFactory.dao(DynamicEntityNames.ITEM_NOTA);
 			Collection<DynamicVO> itensVO = (Collection<DynamicVO>) itemDAO.find("NUNOTA = ?", nunota);
 
-			for (DynamicVO itemVO : itensVO) {
-				// Inicializando item
-				Item item = Item.builder(itemVO);
-				ItemDAO.update(jdbc, item);
-				updateItemOrder(item, itemVO);
+			// Se for o primeiro produto a inserir.
+			if (itensVO.size() <= 1)
+				return;
+			
+			// Se o peso da nota não mudou o programa para por aqui.
+			if (!(cabVO.asBigDecimal("PESOBRUTO").equals(oldCabVO.asBigDecimal("PESOBRUTO")))) {
+				for (DynamicVO itemVO : itensVO) {
+					// Inicializando item
+					Item item = Item.builder(itemVO);
+					item.setVlrunit(new BigDecimal(23));
+					//item = ItemDAO.calcVlrUnit(jdbc, item);
+					updateItemOrder(item, itemVO);
+					
+					System.out.println("Item: " + item.getSequencia() + "\nVlr: " + item.getVlrunit());
+				}
 			}
+
 
 			// if (hnd != null)
 			// throw new Exception("Nunota: " + nunota + "\nPeso: " + peso + "\nQtdNeg: " +
@@ -125,7 +141,7 @@ public class Recalculo implements EventoProgramavelJava {
 	}
 
 	@Override
-	public void beforeUpdate(PersistenceEvent ctx) throws Exception {
+	public void afterUpdate(PersistenceEvent ctx) throws Exception {
 
 	}
 }

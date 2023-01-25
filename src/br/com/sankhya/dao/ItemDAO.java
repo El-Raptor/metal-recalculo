@@ -35,12 +35,13 @@ public class ItemDAO {
 	 * @param peso
 	 * @param nunota
 	 */
-	public static void update(JdbcWrapper jdbc, Item item)
+	public static Item calcVlrUnit(JdbcWrapper jdbc, Item item)
 			throws Exception {
 		NativeSql sql = new NativeSql(jdbc);
 
 		sql.appendSql(" SELECT ");
 		sql.appendSql("    SNK_GET_PRECO_ITE_MW( ");
+		sql.appendSql("       ITE.NUNOTA, ");
 		sql.appendSql("       ITE.SEQUENCIA, ");
 		sql.appendSql("       ITE.CODEMP, ");
 		sql.appendSql("       :SEQATUAL, ");
@@ -49,6 +50,7 @@ public class ItemDAO {
 		sql.appendSql("    TGFITE ITE ");
 		sql.appendSql(" WHERE ");
 		sql.appendSql("    NUNOTA = :NUNOTA ");
+		sql.appendSql("    AND SEQUENCIA = :SEQATUAL ");
 
 		sql.setNamedParameter("SEQATUAL", item.getSequencia());
 		sql.setNamedParameter("PESO", item.getPeso());
@@ -58,6 +60,8 @@ public class ItemDAO {
 
 		if (result.next())
 			item.setVlrunit(result.getBigDecimal(1));
+		
+		return item;
 
 	}
 

@@ -7,10 +7,8 @@ import java.util.List;
 
 import br.com.sankhya.dao.ItemDAO;
 import br.com.sankhya.extensions.eventoprogramavel.EventoProgramavelJava;
-import br.com.sankhya.jape.EntityFacade;
 import br.com.sankhya.jape.core.JapeSession;
 import br.com.sankhya.jape.core.JapeSession.SessionHandle;
-import br.com.sankhya.jape.dao.JdbcWrapper;
 import br.com.sankhya.jape.event.PersistenceEvent;
 import br.com.sankhya.jape.event.TransactionContext;
 import br.com.sankhya.jape.util.JapeSessionContext;
@@ -22,33 +20,26 @@ import br.com.sankhya.modelcore.MGEModelException;
 import br.com.sankhya.modelcore.comercial.CentralItemNota;
 import br.com.sankhya.modelcore.comercial.centrais.CACHelper;
 import br.com.sankhya.modelcore.util.DynamicEntityNames;
-import br.com.sankhya.modelcore.util.EntityFacadeFactory;
 import br.com.sankhya.ws.ServiceContext;
 
 public class Recalculo implements EventoProgramavelJava {
 
 	@Override
-	public void beforeUpdate(PersistenceEvent ctx) throws Exception {
+	public void afterUpdate(PersistenceEvent ctx) throws Exception {
 		SessionHandle hnd = null;
-		JdbcWrapper jdbc = null;
 
 		try {
 			hnd = JapeSession.open();
-			EntityFacade dwfEntityFacade = EntityFacadeFactory.getDWFFacade();
-			jdbc = dwfEntityFacade.getJdbcWrapper();
 
 			// Obtém as instâncias atuais da tabela TGFCAB
 			DynamicVO cabVO = (DynamicVO) ctx.getVo();
-			DynamicVO oldCabVO = (DynamicVO) ctx.getOldVO();
 
 			BigDecimal nunota = cabVO.asBigDecimal("NUNOTA");
 
 			// Se a nota não for nem Pedido nem Venda.
-			if (!cabVO.asString("TIPMOV").equals("P") && !cabVO.asString("TIPMOV").equals("V")) {
-				throw new Exception("Movimentação tem q ser igual a P ou V");
-				// return;
-			}
-
+			if (!cabVO.asString("TIPMOV").equals("P") && !cabVO.asString("TIPMOV").equals("V"))
+				// throw new Exception("Movimentação tem q ser igual a P ou V");
+				return;
 
 			JapeWrapper itemDAO = JapeFactory.dao(DynamicEntityNames.ITEM_NOTA);
 			Collection<DynamicVO> itensVO = (Collection<DynamicVO>) itemDAO.find("NUNOTA = ?", nunota);
@@ -56,24 +47,30 @@ public class Recalculo implements EventoProgramavelJava {
 			// Se for o primeiro produto a inserir.
 			if (itensVO.size() <= 1)
 				return;
-			
-			// Se o peso da nota não mudou o programa para por aqui.
-			if (!(cabVO.asBigDecimal("PESOBRUTO").equals(oldCabVO.asBigDecimal("PESOBRUTO")))) {
-				for (DynamicVO itemVO : itensVO) {
-					// Inicializando item
-					Item item = Item.builder(itemVO);
-					item.setVlrunit(new BigDecimal(23));
-					//item = ItemDAO.calcVlrUnit(jdbc, item);
-					updateItemOrder(item, itemVO);
-					
-					System.out.println("Item: " + item.getSequencia() + "\nVlr: " + item.getVlrunit());
+
+			boolean precisaCalcular = false;
+			// Verifica se há algum item que não foi recalculado.
+			for (DynamicVO itemVO : itensVO) {
+				if (ItemDAO.coalesce(itemVO, "AD_RECALCULADO").equals("N")) {
+					precisaCalcular = true;
+					break;
 				}
 			}
 
+			// Se o peso da nota não mudou o programa para por aqui.
+			if (precisaCalcular) {
+				for (DynamicVO itemVO : itensVO) {
+					Item item = Item.builder(itemVO); // Inicializando item.
+					item = ItemDAO.calcVlrUnit(hnd, item); // Calcula o preço do produto.
+					updateItemOrder(item, itemVO); // Atualiza o item da nota no sistema.
+					System.out.println("Sequencia: " + item.getSequencia() + "\nVlr Unit: " + item.getVlrunit());
+				}
+			}
 
 			// if (hnd != null)
-			// throw new Exception("Nunota: " + nunota + "\nPeso: " + peso + "\nQtdNeg: " +
-			// qtdneg);
+			// throw new Exception("Nunota: " + nunota + "\nPeso: " +
+			// cabVO.asBigDecimal("PESOBRUTO")
+			// + "\nPeso Antigo: " + oldPeso);
 
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -81,7 +78,6 @@ public class Recalculo implements EventoProgramavelJava {
 			MGEModelException.throwMe(e);
 		} finally {
 			JapeSession.close(hnd);
-			jdbc.closeSession();
 		}
 
 	}
@@ -104,10 +100,10 @@ public class Recalculo implements EventoProgramavelJava {
 		BigDecimal vlrunit = item.getVlrunit();
 
 		// itemVO.setProperty("CODPROD", item.getCodprod());
-		// itemVO.setProperty("QTDNEG", item.getQtdneg());
+		itemVO.setProperty("QTDNEG", item.getQtdneg());
 		// itemVO.setProperty("VLRDESC", item.getVlrdesc());
 		// itemVO.setProperty("PERCDESC", item.getPercdesc());
-		itemVO.setProperty("VLRUNIT", new BigDecimal(23));
+		itemVO.setProperty("VLRUNIT", item.getVlrunit());
 		itemVO.setProperty("VLRTOT", vlrunit.multiply(item.getQtdneg()));
 
 		CentralItemNota itemNota = new CentralItemNota();
@@ -141,7 +137,7 @@ public class Recalculo implements EventoProgramavelJava {
 	}
 
 	@Override
-	public void afterUpdate(PersistenceEvent ctx) throws Exception {
+	public void beforeUpdate(PersistenceEvent ctx) throws Exception {
 
 	}
 }

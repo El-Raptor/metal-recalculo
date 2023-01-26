@@ -32,18 +32,28 @@ public class Recalculo implements EventoProgramavelJava {
 			hnd = JapeSession.open();
 
 			// Obtém as instâncias atuais da tabela TGFCAB
-			DynamicVO cabVO = (DynamicVO) ctx.getVo();
+			DynamicVO iteVO = (DynamicVO) ctx.getVo();
+			
+			BigDecimal nunota = iteVO.asBigDecimal("NUNOTA");
 
-			BigDecimal nunota = cabVO.asBigDecimal("NUNOTA");
+			// Busca a instância do registro da tabela TGFCAB
+			JapeWrapper cabDAO = JapeFactory.dao(DynamicEntityNames.CABECALHO_NOTA);
+			DynamicVO cabVO = (DynamicVO) cabDAO.findByPK(nunota);
+			
 
 			// Se a nota não for nem Pedido nem Venda.
 			if (!cabVO.asString("TIPMOV").equals("P") && !cabVO.asString("TIPMOV").equals("V"))
 				// throw new Exception("Movimentação tem q ser igual a P ou V");
 				return;
+			
+			// Se o item atual já foi recalculado.
+			if (iteVO.asString("AD_RECALCULADO").equals("S"))
+				return;
 
+			// Busca a instância de todos os registros de itens da nota.
 			JapeWrapper itemDAO = JapeFactory.dao(DynamicEntityNames.ITEM_NOTA);
 			Collection<DynamicVO> itensVO = (Collection<DynamicVO>) itemDAO.find("NUNOTA = ?", nunota);
-
+			
 			// Se for o primeiro produto a inserir.
 			if (itensVO.size() <= 1)
 				return;
@@ -103,7 +113,7 @@ public class Recalculo implements EventoProgramavelJava {
 		itemVO.setProperty("QTDNEG", item.getQtdneg());
 		// itemVO.setProperty("VLRDESC", item.getVlrdesc());
 		// itemVO.setProperty("PERCDESC", item.getPercdesc());
-		itemVO.setProperty("VLRUNIT", item.getVlrunit());
+		itemVO.setProperty("VLRUNIT", /*item.getVlrunit()*/new BigDecimal(23));
 		itemVO.setProperty("VLRTOT", vlrunit.multiply(item.getQtdneg()));
 
 		CentralItemNota itemNota = new CentralItemNota();
